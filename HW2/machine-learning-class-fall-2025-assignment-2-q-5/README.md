@@ -27,6 +27,7 @@ Either way, `Q5.py` **always** generates `submission.csv` by itself as required 
 ```
 machine-learning-class-fall-2025-assignment-2-q-5/
 ├── Q5.py                     # Required: generates submission.csv
+├── train.py                  # training
 ├── Environment/
 │   └── requirements.txt      # Minimal Python deps (see below)
 ├── train_set/                # Provided by TA (not used by baseline)
@@ -103,9 +104,69 @@ Upload `submission.csv` to the Kaggle competition page.
 
 This is a **few-shot** style prototype: one embedding per candidate.
 
+
+## 4)What the Code Trains
+
+* **Per-game feature**: opening move **heatmap** (Black/White channels) from the **first K moves**, downsampled to a `grid×grid` histogram → vector of size `2*grid*grid`.
+* **Dataset**: from `train_set`, index up to `--keep_games` games **per file (player)** into per-game vectors.
+* **Standardization**: save `mu`/`sd` of features in the checkpoint.
+* **Encoder**: small MLP → L2-normalized embedding.
+* **Loss**: **Supervised Contrastive** (same player = positives).
+* **Batching**: class-balanced sampler (many players × few games per player per batch).
+* **Stability**: AdamW + grad-clip (3.0).
+* **Checkpoint**: `models/enc.pt` contains weights + feature stats & config.
+
 ---
 
-## 5) Expected Results
+## 5) Qick Start
+
+### A) (Baseline, training-free) — already gives ~0.83 with your command
+
+```bash
+python train.py --data_root "D:/NTU Courses/ML/HW2/machine-learning-class-fall-2025-assignment-2-q-5" \
+             --out submission.csv --max_moves 50 --grid 19
+```
+
+### B) Train the encoder (optional; usually improves a few points)
+
+```bash
+python train.py --train \
+  --data_root "D:/NTU Courses/ML/HW2/machine-learning-class-fall-2025-assignment-2-q-5" \
+  --save models/enc.pt \
+  --grid 13 --max_moves 60 --keep_games 250 \
+  --epochs 10 --batch_size 512 --emb_dim 256 --lr 1e-3
+```
+
+**What the flags mean**
+
+* `--grid`: heatmap resolution for features used in training (e.g., 13 or 19).
+* `--max_moves`: number of opening moves per game to count (e.g., 50–80).
+* `--keep_games`: **per train file** games indexed (speed/memory knob).
+* `--emb_dim`: encoder embedding dimension.
+* `--epochs`, `--batch_size`, `--lr`: usual training knobs.
+
+> GPU is recommended but not required. Reduce `--batch_size` if you hit OOM.
+
+### C) Inference with the trained encoder
+
+```bash
+python Q5.py \
+  --data_root "D:/NTU Courses/ML/HW2/machine-learning-class-fall-2025-assignment-2-q-5" \
+  --out submission.csv \
+  --load models/enc.pt
+```
+
+* When `--load` is given, the script:
+
+  1. extracts per-game heatmaps with the **same** `grid/max_moves` stored in the checkpoint,
+  2. standardizes by saved `mu`/`sd`,
+  3. encodes games → **averages per file** → cosine **nearest neighbor** over `cand_set`,
+  4. writes **`submission.csv`** (`id,label`, sorted by id).
+
+
+---
+
+## 6) Expected Results
 
 With the plain baseline command above, I obtained:
 
@@ -116,3 +177,5 @@ Public LB ≈ 0.8333
 Small variations come from heat-map grid, move count, and file parsing differences.
 
 
+* **Training**: `models/enc.pt` (weights + feature stats).
+* **Inference**: `submission.csv` with 600 rows:
